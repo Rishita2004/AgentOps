@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: commerce
+    volumes:
+      - commerce-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U relay -d commerce"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://relay:${POSTGRES_PASSWORD}@postgres:5432/commerce
+      AGENT_DB_PASSWORD: ${AGENT_DB_PASSWORD:?set AGENT_DB_PASSWORD}
+      AGENT_DB_URL: postgresql+psycopg://agent_ro:${AGENT_DB_PASSWORD}@postgres:5432/commerce
+      SELLER_ACCESS_CODE: ${SELLER_ACCESS_CODE:?set SELLER_ACCESS_CODE}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      ALLOWED_HOSTS: 127.0.0.1,localhost,api
+      ALLOWED_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+    ports:
+      - 127.0.0.1:8000:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - 127.0.0.1:5173:80
+    depends_on:
+      - api
+volumes:
+  commerce-data:
