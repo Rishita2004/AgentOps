@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
     with db.begin() as conn:
         conn.execute(text("UPDATE agent_runs SET status = 'interrupted' WHERE status = 'running'"))
     app.state.runner = Runner(db)
+    if not security.seller_configured():
+        logger.warning("AUTH DISABLED: SELLER_ACCESS_CODE or SESSION_SECRET not configured. All endpoints are open.")
     yield
     await asyncio.to_thread(app.state.runner.close)
 
@@ -118,7 +120,12 @@ class Preference(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    try:
+        with get_db().engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception:
+        return JSONResponse({"status": "degraded", "db": "unreachable"}, 503)
 
 
 @app.get("/api/session")
@@ -283,8 +290,8 @@ if _FRONTEND_DIR.is_dir():
     # SPA catch-all: any non-API route serves index.html
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # If a specific static file exists, serve it (e.g. favicon.ico)
-        file = _FRONTEND_DIR / full_path
-        if full_path and file.is_file() and ".." not in full_path:
-            return FileResponse(file)
+        if full_path:
+            file = (_FRONTEND_DIR / full_path).resolve()
+            if file.is_relative_to(_FRONTEND_DIR) and file.is_file():
+                return FileResponse(file)
         return FileResponse(_FRONTEND_DIR / "index.html")

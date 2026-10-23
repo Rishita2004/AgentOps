@@ -2,7 +2,7 @@ import hmac
 import os
 import secrets
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from hashlib import sha256
 from threading import Lock
 
@@ -25,7 +25,8 @@ def check_access_code(candidate: str) -> bool:
     return seller_configured() and hmac.compare_digest(candidate.encode(), expected.encode())
 
 
-_revoked: set[str] = set()
+_revoked: OrderedDict[str, None] = OrderedDict()
+_revoked_lock = Lock()
 
 
 def issue_token() -> str:
@@ -34,8 +35,11 @@ def issue_token() -> str:
 
 
 def verify_token(token: str | None) -> bool:
-    if not token or not seller_configured() or token in _revoked:
+    if not token or not seller_configured():
         return False
+    with _revoked_lock:
+        if token in _revoked:
+            return False
     payload, _, signature = token.rpartition(".")
     expected = hmac.new(_secret(), payload.encode(), sha256).hexdigest()
     if not payload or not hmac.compare_digest(signature, expected):
@@ -48,9 +52,12 @@ def verify_token(token: str | None) -> bool:
 
 def revoke_token(token: str | None) -> None:
     if token:
-        _revoked.add(token)
-        if len(_revoked) > 5000:
-            _revoked.clear()
+        with _revoked_lock:
+            _revoked[token] = None
+            _revoked.move_to_end(token)
+            if len(_revoked) > 5000:
+                for _ in range(1000):
+                    _revoked.popitem(last=False)
 
 
 class RateLimiter:
@@ -62,7 +69,9 @@ class RateLimiter:
         now = time.monotonic()
         with self._lock:
             if len(self._hits) > 10000:
-                self._hits.clear()
+                keys = list(self._hits.keys())
+                for key in keys[:2000]:
+                    del self._hits[key]
             hits = self._hits[(bucket, who)]
             while hits and now - hits[0] > window:
                 hits.popleft()
@@ -87,5 +96,5 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), interest-cohort=()",
 }
