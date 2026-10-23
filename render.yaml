@@ -27,7 +27,7 @@ services:
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: ALLOWED_HOSTS
-        value: ".onrender.com"
+        value: "*.onrender.com"
       - key: ALLOWED_ORIGINS
         value: ""
       - key: MAX_RUNS_PER_HOUR
