@@ -32,5 +32,7 @@ services:
         value: ""
       - key: MAX_RUNS_PER_HOUR
         value: "20"
+      - key: LOG_FORMAT
+        value: "json"
       - key: PYTHON_VERSION
         value: "3.13"

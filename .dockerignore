@@ -7,3 +7,13 @@
 .pgdata
 *.db
 frontend/dist
+*.md
+.github/
+tests/
+pytest.ini
+.env.example
+artifacts/
+*.pyc
+compose.yaml
+render.yaml
+package.json

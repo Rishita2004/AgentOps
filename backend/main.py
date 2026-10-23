@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -39,6 +40,29 @@ def get_db() -> Database:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_format = os.getenv("LOG_FORMAT", "text")
+    if log_format == "json":
+        import json as _json
+
+        class JsonFormatter(logging.Formatter):
+            def format(self, record):
+                return _json.dumps({
+                    "ts": self.formatTime(record),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "msg": record.getMessage(),
+                }, default=str)
+
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(JsonFormatter())
+        logging.root.handlers = [handler]
+        logging.root.setLevel(logging.INFO)
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+
     db = get_db()
     db.init_schema(os.getenv("AGENT_DB_PASSWORD"))
     dbmod.seed(db)
