@@ -42,6 +42,7 @@ export async function api<T>(path: string, method = "GET", body?: unknown): Prom
   return response.json();
 }
 
-export const rupees = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
+const _inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
+export const rupees = (value: number) => _inr.format(value);
 export const pct = (value: number | null | undefined, digits = 0) => (value === null || value === undefined ? "n/a" : `${(value * 100).toFixed(digits)}%`);
 export const AGENTS: Record<string, string> = { supervisor: "Supervisor", demand_forecaster: "Demand forecaster", inventory_optimizer: "Inventory optimizer", dynamic_pricer: "Dynamic pricer", policy_gate: "Policy gate", risk_critic: "Risk critic", risk_review: "Risk review" };

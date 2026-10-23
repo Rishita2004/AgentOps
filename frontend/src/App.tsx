@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Activity, Database, LayoutGrid, LoaderCircle, PackageCheck, Radio, ShieldCheck, Workflow } from "lucide-react";
 import LiveRun from "./LiveRun";
-import PerformanceView from "./PerformanceView";
+const PerformanceView = lazy(() => import("./PerformanceView"));
 import { api, ApiError, rupees } from "./lib";
 import type { Overview } from "./lib";
 
@@ -13,11 +13,12 @@ function DataView({ overview }: { overview: Overview }) {
       <div className="bar"><div><h1>Data</h1><p>The live PostgreSQL state the agents query. Prices and orders here change only when a decision is approved.</p></div></div>
       <section className="panel table">
         <table>
+          <caption style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>Product inventory and pricing data</caption>
           <thead><tr><th>Product</th><th>Price</th><th>Cost</th><th>On hand</th><th>On order</th><th>Lead time</th><th>Sold, 7 days</th></tr></thead>
           <tbody>
             {overview.products.map((product) => (
               <tr key={product.id}>
-                <td><div className="cell">{product.image && <img src={product.image} alt="" loading="lazy" />}<div><b>{product.name}</b><small>{product.id} · {product.category}</small></div></div></td>
+                <td><div className="cell">{product.image && <img src={product.image} alt={product.name} loading="lazy" />}<div><b>{product.name}</b><small>{product.id} · {product.category}</small></div></div></td>
                 <td>{rupees(product.price)}{product.price !== product.reference_price && <small className="delta">list {rupees(product.reference_price)}</small>}</td>
                 <td>{rupees(product.cost)}</td>
                 <td className={product.on_hand < product.sold_7d ? "low" : ""}>{product.on_hand}</td>
@@ -60,9 +61,9 @@ export default function App() {
       <header className="top">
         <div className="top-in">
           <div className="brand"><Workflow size={19} /><b>Agent Operations</b><span className="env">PostgreSQL · LangGraph · {overview?.gemini ? "Gemini" : "local models"}</span></div>
-          <nav aria-label="Sections">
+          <nav aria-label="Sections" role="tablist">
             {([["Live run", Radio], ["Performance", Activity], ["Data", LayoutGrid]] as const).map(([name, Icon]) => (
-              <button key={name} className={tab === name ? "on" : ""} onClick={() => setTab(name)} aria-current={tab === name ? "page" : undefined}><Icon size={15} /> {name}{name === "Live run" && overview && overview.pending > 0 && <i>{overview.pending}</i>}</button>
+              <button key={name} role="tab" className={tab === name ? "on" : ""} onClick={() => setTab(name)} aria-current={tab === name ? "page" : undefined}><Icon size={15} /> {name}{name === "Live run" && overview && overview.pending > 0 && <i>{overview.pending}</i>}</button>
             ))}
           </nav>
           <div className="top-end">
@@ -72,7 +73,7 @@ export default function App() {
       </header>
       <main className="main">
         {error && <div className="alert" role="alert"><span>{error}</span></div>}
-        {!overview ? <div className="loading"><LoaderCircle className="spin" size={26} /></div> : tab === "Live run" ? <LiveRun overview={overview} reload={reload} /> : tab === "Performance" ? <PerformanceView overview={overview} reload={reload} /> : <DataView overview={overview} />}
+        {!overview ? <div className="loading"><LoaderCircle className="spin" size={26} /></div> : tab === "Live run" ? <LiveRun overview={overview} reload={reload} /> : tab === "Performance" ? <Suspense fallback={<div className="loading"><LoaderCircle className="spin" size={26} /></div>}><PerformanceView overview={overview} reload={reload} /></Suspense> : <DataView overview={overview} />}
         <footer className="foot"><PackageCheck size={12} /> Demo market: sales, prices and orders are simulated. Decisions change this database only; nothing is sent to any marketplace.</footer>
       </main>
     </div>

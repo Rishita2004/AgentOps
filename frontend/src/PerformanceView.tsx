@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Boxes, CalendarPlus, CheckCircle2, LoaderCircle, TrendingUp } from "lucide-react";
 import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, pct, rupees } from "./lib";
@@ -49,15 +49,15 @@ export default function PerformanceView({ overview, reload }: { overview: Overvi
   const ids = detail?.forecasts.map((item) => item.product_id).filter((id, index, all) => all.indexOf(id) === index) ?? [];
   const chosen = ids.includes(product) ? product : ids[0] ?? "";
   const nameOf = (id: string) => overview.products.find((item) => item.id === id)?.name ?? id;
-  const series = (detail?.forecasts.filter((item: Forecast) => item.product_id === chosen) ?? []).map((item, index) => ({ day: `D${index + 1}`, mean: item.mean, baseline: item.baseline, range: [item.lower, item.upper] }));
-  const risks = [...(detail?.stockout ?? [])].sort((a: Stockout, b: Stockout) => b.p_before_resupply - a.p_before_resupply).map((item) => ({ name: nameOf(item.product_id), risk: Math.round(item.p_before_resupply * 100), cover: item.days_cover }));
+  const series = useMemo(() => (detail?.forecasts.filter((item: Forecast) => item.product_id === chosen) ?? []).map((item, index) => ({ day: `D${index + 1}`, mean: item.mean, baseline: item.baseline, range: [item.lower, item.upper] })), [detail, chosen]);
+  const risks = useMemo(() => [...(detail?.stockout ?? [])].sort((a: Stockout, b: Stockout) => b.p_before_resupply - a.p_before_resupply).map((item) => ({ name: nameOf(item.product_id), risk: Math.round(item.p_before_resupply * 100), cover: item.days_cover })), [detail, overview]);
   const elasticity = perf?.elasticity.find((item) => item.product_id === chosen) ?? perf?.elasticity[0];
 
   if (!perf) return <div className="loading"><LoaderCircle className="spin" size={26} /></div>;
   const f = perf.forecast.overall;
   const s = perf.stockout;
   const covered = perf.elasticity.filter((item) => item.covered).length;
-  const calibration = s.calibration.map((row) => ({ predicted: Math.round(row.predicted * 100), observed: Math.round(row.observed * 100), n: row.n }));
+  const calibration = useMemo(() => s.calibration.map((row) => ({ predicted: Math.round(row.predicted * 100), observed: Math.round(row.observed * 100), n: row.n })), [s]);
 
   return (
     <>

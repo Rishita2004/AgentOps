@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, AlertTriangle, Boxes, Check, CheckCircle2, Circle, Code2, Database, GitBranch, LoaderCircle, PackageCheck, Play, RefreshCw, ShieldCheck, Sparkles, TrendingUp, X, Zap } from "lucide-react";
 import { api, ApiError, AGENTS, rupees } from "./lib";
 import type { AgentEvent, Decision, Overview, RunDetail } from "./lib";
@@ -27,7 +27,7 @@ function Node({ id, icon: Icon, sub, events, picked, onPick }: { id: NodeId; ico
   );
 }
 
-function EventRow({ event }: { event: AgentEvent }) {
+const EventRow = React.memo(function EventRow({ event }: { event: AgentEvent }) {
   const detail = event.detail as Record<string, unknown>;
   const label = event.kind === "sql" ? "SQL" : event.kind === "tool_call" ? "TOOL" : event.kind === "tool_result" ? "RESULT" : event.kind === "guardrail" ? "GUARD" : event.kind === "fallback" ? "FALLBACK" : event.kind.replace("_", " ").toUpperCase();
   return (
@@ -41,7 +41,7 @@ function EventRow({ event }: { event: AgentEvent }) {
       </div>
     </li>
   );
-}
+});
 
 function DecisionCard({ decision, busy, onDecide }: { decision: Decision; busy: boolean; onDecide: (approve: boolean) => void }) {
   const Icon = decision.kind === "price" ? TrendingUp : decision.kind === "reorder" ? PackageCheck : Zap;
@@ -74,6 +74,7 @@ export default function LiveRun({ overview, reload }: { overview: Overview; relo
   const logRef = useRef<HTMLOListElement>(null);
   const run = overview.runs.find((item) => item.id === runId) ?? overview.runs[0];
   const running = run?.status === "running";
+  const runStatus = run?.status;
 
   const guard = useCallback((reason: unknown) => {
     setError(reason instanceof ApiError ? reason.message : "Something went wrong.");
@@ -103,8 +104,7 @@ export default function LiveRun({ overview, reload }: { overview: Overview; relo
       source.onerror = () => setStream("reconnecting");
     }).catch(guard);
     return () => { cancelled = true; source?.close(); setStream(""); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, run?.status === "running"]);
+  }, [runId, runStatus, guard, loadDetail, reload]);
 
   useEffect(() => { logRef.current?.lastElementChild?.scrollIntoView({ block: "nearest" }); }, [events.length]);
 
