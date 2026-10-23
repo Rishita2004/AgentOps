@@ -98,7 +98,18 @@ class Database:
             url = url.replace("postgresql://", "postgresql+psycopg://", 1)
         if not url.startswith("postgresql"):
             raise RuntimeError("DATABASE_URL must point to PostgreSQL (postgresql+psycopg://...)")
+        # Render PostgreSQL requires SSL; append sslmode if missing
+        if ".onrender.com" in url and "sslmode" not in url:
+            url += ("&" if "?" in url else "?") + "sslmode=require"
         ro_url = os.getenv("AGENT_DB_URL") or None
+        # Auto-derive AGENT_DB_URL from DATABASE_URL + AGENT_DB_PASSWORD when not set
+        agent_pw = os.getenv("AGENT_DB_PASSWORD", "")
+        if (not ro_url or ro_url == "placeholder") and agent_pw and "://" in url:
+            from urllib.parse import urlparse, urlunparse, quote
+            parsed = urlparse(url)
+            ro_url = urlunparse(parsed._replace(netloc=f"agent_ro:{quote(agent_pw)}@{parsed.hostname}" + (f":{parsed.port}" if parsed.port else "")))
+        if ro_url and ".onrender.com" in ro_url and "sslmode" not in ro_url:
+            ro_url += ("&" if "?" in ro_url else "?") + "sslmode=require"
         if ro_url and ro_url.startswith("postgres://"):
             ro_url = ro_url.replace("postgres://", "postgresql+psycopg://", 1)
         elif ro_url and ro_url.startswith("postgresql://") and "+psycopg" not in ro_url:

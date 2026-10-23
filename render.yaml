@@ -18,9 +18,6 @@ services:
         # Render gives psycopg2-style URL; we rewrite in the app
       - key: AGENT_DB_PASSWORD
         generateValue: true
-      - key: AGENT_DB_URL
-        # Set manually after first deploy (uses the agent_ro role created on startup)
-        value: placeholder
       - key: SESSION_SECRET
         generateValue: true
       - key: SELLER_ACCESS_CODE
