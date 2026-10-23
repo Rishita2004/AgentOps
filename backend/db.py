@@ -1,6 +1,7 @@
 """PostgreSQL schema, seeding and the market simulator that turns agent decisions into measurable outcomes."""
 
 import datetime as dt
+import logging
 import math
 import os
 from contextlib import contextmanager
@@ -10,6 +11,8 @@ import psycopg
 from psycopg import sql
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS products(
@@ -125,15 +128,21 @@ class Database:
         with psycopg.connect(self.psycopg_url, autocommit=True) as conn:
             conn.execute(SCHEMA)
             if agent_password:
-                exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
-                verb = "ALTER" if exists else "CREATE"
-                conn.execute(sql.SQL(verb + " ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE").format(sql.Identifier(role), sql.Literal(agent_password)))
-                db_name = conn.execute("SELECT current_database()").fetchone()[0]
-                conn.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(db_name), sql.Identifier(role)))
-                conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
-                conn.execute(sql.SQL("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {}").format(sql.Identifier(role)))
-                for table in READ_ONLY_TABLES:
-                    conn.execute(sql.SQL("GRANT SELECT ON {} TO {}").format(sql.Identifier(table), sql.Identifier(role)))
+                try:
+                    exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
+                    if exists:
+                        conn.execute(sql.SQL("ALTER ROLE {} LOGIN PASSWORD {}").format(sql.Identifier(role), sql.Literal(agent_password)))
+                    else:
+                        conn.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(sql.Identifier(role), sql.Literal(agent_password)))
+                    db_name = conn.execute("SELECT current_database()").fetchone()[0]
+                    conn.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(db_name), sql.Identifier(role)))
+                    conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
+                    conn.execute(sql.SQL("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {}").format(sql.Identifier(role)))
+                    for table in READ_ONLY_TABLES:
+                        conn.execute(sql.SQL("GRANT SELECT ON {} TO {}").format(sql.Identifier(table), sql.Identifier(role)))
+                except psycopg.errors.InsufficientPrivilege:
+                    logger.warning("Cannot create/alter agent_ro role (managed DB). Agents will use the main database connection.")
+                    self.ro_engine = None
 
     @contextmanager
     def begin(self):
