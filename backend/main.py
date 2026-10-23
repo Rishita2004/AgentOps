@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -157,39 +158,56 @@ def _rows(db: Database, query: str, **params) -> list[dict]:
         return jsonable([dict(r) for r in conn.execute(text(query), params).mappings()])
 
 
+def _rows_conn(conn, query: str, **params) -> list[dict]:
+    return jsonable([dict(r) for r in conn.execute(text(query), params).mappings()])
+
+
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+
+
+def _valid_uuid(value: str) -> str:
+    if not _UUID_RE.match(value):
+        raise HTTPException(400, "Invalid identifier")
+    return value
+
+
 @app.get("/api/overview", dependencies=[Depends(operator)])
 def overview():
     db = get_db()
-    products = _rows(db, "SELECT p.id, p.name, p.category, p.price::float, p.reference_price::float, p.cost::float, p.lead_days, p.image, i.on_hand, "
-                         "COALESCE((SELECT sum(qty) FROM purchase_orders o WHERE o.product_id = p.id AND o.status = 'open'), 0)::int AS on_order, "
-                         "(SELECT COALESCE(sum(units), 0) FROM sales_daily s WHERE s.product_id = p.id AND s.day > (SELECT today FROM sim_state) - 7)::int AS sold_7d "
-                         "FROM products p JOIN inventory i ON i.product_id = p.id ORDER BY p.id")
-    runs = _rows(db, "SELECT id, scenario, goal, status, sim_day, execution_mode, started_at, finished_at, error, "
-                     "(SELECT count(*) FROM decisions d WHERE d.run_id = r.id)::int AS decisions FROM agent_runs r ORDER BY started_at DESC LIMIT 25")
-    pending = _rows(db, "SELECT count(*)::int AS n FROM decisions WHERE status = 'pending'")[0]["n"]
+    with db.engine.connect() as conn:
+        products = _rows_conn(conn, "SELECT p.id, p.name, p.category, p.price::float, p.reference_price::float, p.cost::float, p.lead_days, p.image, i.on_hand, "
+                             "COALESCE((SELECT sum(qty) FROM purchase_orders o WHERE o.product_id = p.id AND o.status = 'open'), 0)::int AS on_order, "
+                             "(SELECT COALESCE(sum(units), 0) FROM sales_daily s WHERE s.product_id = p.id AND s.day > (SELECT today FROM sim_state) - 7)::int AS sold_7d "
+                             "FROM products p JOIN inventory i ON i.product_id = p.id ORDER BY p.id")
+        runs = _rows_conn(conn, "SELECT id, scenario, goal, status, sim_day, execution_mode, started_at, finished_at, error, "
+                         "(SELECT count(*) FROM decisions d WHERE d.run_id = r.id)::int AS decisions FROM agent_runs r ORDER BY started_at DESC LIMIT 25")
+        pending = _rows_conn(conn, "SELECT count(*)::int AS n FROM decisions WHERE status = 'pending'")[0]["n"]
     return {"products": products, "runs": runs, "pending": pending, "market_day": db.today().isoformat(), "auto_approve": bool(db.setting("auto_approve", False)), "gemini": bool(os.getenv("GEMINI_API_KEY"))}
 
 
 @app.get("/api/runs/{run_id}", dependencies=[Depends(operator)])
 def run_detail(run_id: str):
+    run_id = _valid_uuid(run_id)
     db = get_db()
-    head = _rows(db, "SELECT id, scenario, goal, status, sim_day, execution_mode, started_at, finished_at, error FROM agent_runs WHERE id = CAST(:i AS uuid)", i=run_id)
-    if not head:
-        raise HTTPException(404, "Not found")
-    return {
-        "run": head[0],
-        "metrics": _rows(db, "SELECT agent, provider, model_calls, tool_calls, sql_queries, duration_ms::float, completed_locally, rationale FROM agent_metrics WHERE run_id = CAST(:i AS uuid) ORDER BY agent", i=run_id),
-        "decisions": _rows(db, "SELECT d.id, d.product_id, p.name AS product_name, d.agent, d.kind, d.before_value, d.after_value, d.quantity, d.reason, d.evidence, d.needs_approval, d.status, d.created_at "
-                               "FROM decisions d JOIN products p ON p.id = d.product_id WHERE d.run_id = CAST(:i AS uuid) ORDER BY d.created_at, d.kind", i=run_id),
-        "forecasts": _rows(db, "SELECT product_id, target_day, mean, lower, upper, baseline FROM forecasts WHERE run_id = CAST(:i AS uuid) ORDER BY product_id, target_day", i=run_id),
-        "stockout": _rows(db, "SELECT product_id, made_on, window_days, p_stockout, p_before_resupply, expected_day, days_cover, on_hand, incoming FROM stockout_predictions WHERE run_id = CAST(:i AS uuid) ORDER BY p_before_resupply DESC", i=run_id),
-        "elasticity": _rows(db, "SELECT product_id, elasticity, std_err, n_obs, r2, usable, reason, curve FROM elasticity_estimates WHERE run_id = CAST(:i AS uuid) ORDER BY product_id", i=run_id),
-        "quality": _rows(db, "SELECT product_id, wape::float, baseline_wape::float, days_used FROM forecast_quality WHERE run_id = CAST(:i AS uuid) ORDER BY product_id", i=run_id),
-    }
+    with db.engine.connect() as conn:
+        head = _rows_conn(conn, "SELECT id, scenario, goal, status, sim_day, execution_mode, started_at, finished_at, error FROM agent_runs WHERE id = CAST(:i AS uuid)", i=run_id)
+        if not head:
+            raise HTTPException(404, "Not found")
+        return {
+            "run": head[0],
+            "metrics": _rows_conn(conn, "SELECT agent, provider, model_calls, tool_calls, sql_queries, duration_ms::float, completed_locally, rationale FROM agent_metrics WHERE run_id = CAST(:i AS uuid) ORDER BY agent", i=run_id),
+            "decisions": _rows_conn(conn, "SELECT d.id, d.product_id, p.name AS product_name, d.agent, d.kind, d.before_value, d.after_value, d.quantity, d.reason, d.evidence, d.needs_approval, d.status, d.created_at "
+                                   "FROM decisions d JOIN products p ON p.id = d.product_id WHERE d.run_id = CAST(:i AS uuid) ORDER BY d.created_at, d.kind", i=run_id),
+            "forecasts": _rows_conn(conn, "SELECT product_id, target_day, mean, lower, upper, baseline FROM forecasts WHERE run_id = CAST(:i AS uuid) ORDER BY product_id, target_day", i=run_id),
+            "stockout": _rows_conn(conn, "SELECT product_id, made_on, window_days, p_stockout, p_before_resupply, expected_day, days_cover, on_hand, incoming FROM stockout_predictions WHERE run_id = CAST(:i AS uuid) ORDER BY p_before_resupply DESC", i=run_id),
+            "elasticity": _rows_conn(conn, "SELECT product_id, elasticity, std_err, n_obs, r2, usable, reason, curve FROM elasticity_estimates WHERE run_id = CAST(:i AS uuid) ORDER BY product_id", i=run_id),
+            "quality": _rows_conn(conn, "SELECT product_id, wape::float, baseline_wape::float, days_used FROM forecast_quality WHERE run_id = CAST(:i AS uuid) ORDER BY product_id", i=run_id),
+        }
 
 
 @app.get("/api/runs/{run_id}/events", dependencies=[Depends(operator)])
 async def events(run_id: str, request: Request):
+    run_id = _valid_uuid(run_id)
     db = get_db()
     try:
         after = max(0, int(request.headers.get("last-event-id", "0") or 0))
@@ -219,6 +237,7 @@ async def events(run_id: str, request: Request):
 
 @app.get("/api/runs/{run_id}/events/all", dependencies=[Depends(operator)])
 def events_all(run_id: str):
+    run_id = _valid_uuid(run_id)
     return _rows(get_db(), "SELECT seq, agent, kind, title, detail, ts FROM agent_events WHERE run_id = CAST(:i AS uuid) ORDER BY seq", i=run_id)
 
 
@@ -236,6 +255,7 @@ def start(body: RunRequest):
 
 @app.post("/api/runs/{run_id}/resume", status_code=202, dependencies=[Depends(operator)])
 def resume(run_id: str):
+    run_id = _valid_uuid(run_id)
     try:
         return {"id": app.state.runner.start(None, "baseline", [], resume_id=run_id)}
     except (RuntimeError, ValueError) as error:
@@ -244,6 +264,7 @@ def resume(run_id: str):
 
 @app.post("/api/decisions/{decision_id}", dependencies=[Depends(operator)])
 def decision(decision_id: str, body: Approval):
+    decision_id = _valid_uuid(decision_id)
     try:
         return jsonable(decide(get_db(), decision_id, body.approve))
     except KeyError as error:

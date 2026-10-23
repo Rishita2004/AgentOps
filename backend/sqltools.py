@@ -72,10 +72,12 @@ class SqlSession:
             raise ValueError("Query is not allowlisted")
         started = time.perf_counter()
         with self.engine.connect() as conn:
-            conn.execute(text("SET TRANSACTION READ ONLY"))
-            conn.execute(text("SET LOCAL statement_timeout = '4s'"))
-            rows = [dict(row) for row in conn.execute(text(QUERIES[name]), params).mappings().fetchmany(MAX_ROWS)]
-            conn.rollback()
+            try:
+                conn.execute(text("SET TRANSACTION READ ONLY"))
+                conn.execute(text("SET LOCAL statement_timeout = '4s'"))
+                rows = [dict(row) for row in conn.execute(text(QUERIES[name]), params).mappings().fetchmany(MAX_ROWS)]
+            finally:
+                conn.rollback()
         self.count += 1
         if self.on_query:
             shown = {key: (value if not isinstance(value, list) else f"{len(value)} ids") for key, value in params.items()}
