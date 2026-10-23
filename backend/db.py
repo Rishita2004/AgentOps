@@ -91,9 +91,19 @@ class Database:
     @classmethod
     def from_env(cls) -> "Database":
         url = os.getenv("DATABASE_URL", "")
+        # Render/Heroku provide postgres:// but SQLAlchemy needs postgresql+psycopg://
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+psycopg://", 1)
+        elif url.startswith("postgresql://") and "+psycopg" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
         if not url.startswith("postgresql"):
             raise RuntimeError("DATABASE_URL must point to PostgreSQL (postgresql+psycopg://...)")
-        return cls(url, os.getenv("AGENT_DB_URL") or None)
+        ro_url = os.getenv("AGENT_DB_URL") or None
+        if ro_url and ro_url.startswith("postgres://"):
+            ro_url = ro_url.replace("postgres://", "postgresql+psycopg://", 1)
+        elif ro_url and ro_url.startswith("postgresql://") and "+psycopg" not in ro_url:
+            ro_url = ro_url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return cls(url, ro_url)
 
     @property
     def psycopg_url(self) -> str:

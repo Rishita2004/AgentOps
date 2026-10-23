@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -12,7 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -58,7 +60,13 @@ async def protect(request: Request, call_next):
         if "chunked" in request.headers.get("transfer-encoding", "").lower() or (length and (not length.isdigit() or int(length) > security.MAX_BODY_BYTES)):
             return JSONResponse({"detail": "Request too large"}, 413)
         origin = request.headers.get("origin")
-        if (origin is not None and origin not in security.allowed_origins()) or (origin is None and request.cookies.get(security.COOKIE)):
+        origins = security.allowed_origins()
+        # When frontend is served from the same origin (production), allow same-origin requests
+        if not origins:
+            scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+            host = request.headers.get("host", "")
+            origins = {f"{scheme}://{host}"} if host else set()
+        if (origin is not None and origin not in origins) or (origin is None and request.cookies.get(security.COOKIE)):
             return JSONResponse({"detail": "Request not accepted"}, 403)
     response = await call_next(request)
     for name, value in security.SECURITY_HEADERS.items():
@@ -258,3 +266,22 @@ def export():
     for row in _rows(get_db(), "SELECT d.created_at, d.agent, p.name, d.kind, d.before_value, d.after_value, d.quantity, d.status, d.reason FROM decisions d JOIN products p ON p.id = d.product_id ORDER BY d.created_at DESC LIMIT 5000"):
         writer.writerow([("'" + str(v)) if isinstance(v, str) and v[:1] in "=+-@\t\r" else v for v in row.values()])
     return Response(out.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=decisions.csv"})
+
+
+# ---------------------------------------------------------------------------
+# Serve frontend static files in production (when frontend/dist exists)
+# ---------------------------------------------------------------------------
+_FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+if _FRONTEND_DIR.is_dir():
+    # Serve static assets (JS, CSS, images) from /assets
+    app.mount("/assets", StaticFiles(directory=_FRONTEND_DIR / "assets"), name="frontend-assets")
+
+    # SPA catch-all: any non-API route serves index.html
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # If a specific static file exists, serve it (e.g. favicon.ico)
+        file = _FRONTEND_DIR / full_path
+        if full_path and file.is_file() and ".." not in full_path:
+            return FileResponse(file)
+        return FileResponse(_FRONTEND_DIR / "index.html")
