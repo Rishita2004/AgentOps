@@ -73,6 +73,9 @@ async def protect(request: Request, call_next):
         response.headers.setdefault(name, value)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    else:
+        response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' https://cdn.dummyjson.com data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     return response
 
 
